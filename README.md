@@ -4,11 +4,11 @@
 
 1. Clona el repositorio:
    ```bash
-   git clone https://github.com/JoseCarlosGS/SW1BackendFA.git
+   https://github.com/RubenCano21/AppLocation.git
    ```
 2. Navega al directorio del proyecto:
    ```bash
-   cd SW1BackendFA
+   cd AppLocation
    ```
 3. Crea un nuevo entorno virtual:
    ```bash
@@ -52,5 +52,5 @@ python deploy.py
 Para iniciar el servicio, ejecuta:
 
 ```bash
-uvicorn app.main:app --reload --port 8000
+uvicorn api.main:app --reload --port 8000
 ```
