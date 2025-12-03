@@ -52,5 +52,5 @@ python deploy.py
 Para iniciar el servicio, ejecuta:
 
 ```bash
-uvicorn api.main:app --reload --port 8000
+uvicorn app.main:app --reload --port 8000
 ```
