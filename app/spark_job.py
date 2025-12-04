@@ -158,39 +158,6 @@ def write_summary_to_postgres(df_summary):
     cur.close()
     conn.close()
 
-def write_clean_to_postgres(df_clean):
-    """
-    Escribe la tabla limpia en devices_positions_clean reemplazando por completo.
-    Para grandes volúmenes, usa append o particiones.
-    """
-    if df_clean.rdd.isEmpty():
-        print("No clean rows to write.")
-        return
-
-    pdf = df_clean.select("id","device_name","device_id","latitude","longitude","altitude","speed","battery","signal","sim_operator","network_type","timestamp").toPandas()
-
-    conn = psycopg2.connect(host=DEST_PG_HOST, port=DEST_PG_PORT, dbname=DEST_PG_DB, user=DEST_PG_USER, password=DEST_PG_PASSWORD)
-    cur = conn.cursor()
-
-    # Borrar y reinsertar (alternativa: truncate + copy_from for performance)
-    cur.execute("TRUNCATE TABLE public.devices_positions_clean;")
-    conn.commit()
-
-    tuples = list(pdf.itertuples(index=False, name=None))
-    sql = """
-    INSERT INTO public.devices_positions_clean
-    (id, device_name, device_id, latitude, longitude, altitude, speed, battery, signal, sim_operator, network_type, timestamp)
-    VALUES (%s)
-    """
-    if tuples:
-        execute_values(cur, sql, tuples)
-        conn.commit()
-        print(f"Wrote {len(tuples)} clean rows to Postgres.")
-    else:
-        print("No tuples to insert.")
-
-    cur.close()
-    conn.close()
 
 def main():
     # crear spark
@@ -215,7 +182,6 @@ def main():
     ensure_tables_created()
 
     # escribir resultados
-    write_clean_to_postgres(df_clean)
     write_summary_to_postgres(df_summary)
 
     spark.stop()

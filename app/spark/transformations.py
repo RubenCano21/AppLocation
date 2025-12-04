@@ -2,21 +2,121 @@
 from pyspark.sql import DataFrame
 from pyspark.sql.functions import (
     col, when, lit, concat, avg, count,
-    round as spark_round, floor, countDistinct
+    round as spark_round, floor, countDistinct,
+    hour, to_date, udf
 )
+from pyspark.sql.types import StringType
 import logging
 
 logger = logging.getLogger(__name__)
 
 
+def normalize_operator_udf():
+    """UDF para normalizar nombres de operadores"""
+    def normalize(operator):
+        if operator is None or operator == '':
+            return 'SIN SEÑAL'
+
+        operator = operator.strip()
+        operator_upper = operator.upper()
+
+        # Unknown, Sin señal -> SIN SEÑAL
+        if operator_upper in ['UNKNOWN', 'SIN SEÑAL', 'SIN SEAL', 'N/A', 'NA']:
+            return 'SIN SEÑAL'
+
+        # Normalizar ENTEL y sus variantes
+        if any(x in operator_upper for x in ['ENTEL', 'BOMOV', '+18VACUNATE', 'LADISTANCIANOSCUIDA', 'MOVIL GSM', 'T-MOBILE']):
+            return 'ENTEL'
+
+        # TIGO
+        if 'TIGO' in operator_upper:
+            return 'TIGO'
+
+        # VIVA
+        if 'VIVA' in operator_upper:
+            return 'VIVA'
+
+        # Sin señal (variantes)
+        if 'SIN' in operator_upper or 'SEAL' in operator_upper:
+            return 'SIN SEÑAL'
+
+        # Si no coincide con ninguno, devolver en mayúsculas
+        return operator_upper
+
+    return udf(normalize, StringType())
+
+
+def normalize_network_type_udf():
+    """UDF para normalizar tipos de red"""
+    def normalize(network_type):
+        if network_type is None or network_type == '':
+            return 'SIN DATOS'
+
+        network = network_type.strip()
+        network_upper = network.upper()
+
+        # WiFi
+        if 'WIFI' in network_upper or 'WI-FI' in network_upper:
+            return 'WiFi'
+
+        # 5G
+        if '5G' in network_upper:
+            return '5G'
+
+        # 4G/LTE/Mobile -> 4G
+        if '4G' in network_upper or 'LTE' in network_upper or ('MOBILE' in network_upper and len(network_upper) < 15):
+            return '4G'
+
+        # 3G
+        if '3G' in network_upper or 'HSDPA' in network_upper or 'HSPA' in network_upper or 'UMTS' in network_upper or 'WCDMA' in network_upper:
+            return '3G'
+
+        # 2G
+        if '2G' in network_upper or 'EDGE' in network_upper or 'GPRS' in network_upper or 'GSM' in network_upper:
+            return '2G'
+
+        # Si no coincide con ninguno, devolver SIN DATOS
+        return 'SIN DATOS'
+
+    return udf(normalize, StringType())
+
+
+def classify_speed_udf():
+    """UDF para clasificar velocidad en rangos"""
+    def classify(speed):
+        if speed is None:
+            return 'DETENIDO'
+
+        try:
+            speed_val = float(speed)
+            # Convertir de m/s a km/h para clasificar
+            speed_kmh = speed_val * 3.6
+
+            if speed_kmh == 0:
+                return 'DETENIDO'
+            elif speed_kmh <= 5:  # 0.1 - 5 km/h
+                return 'CAMINANDO'
+            elif speed_kmh <= 10:  # 5 - 10 km/h
+                return 'CORRIENDO'
+            elif speed_kmh <= 60:  # 10 - 60 km/h
+                return 'TRANSPORTE PÚBLICO'
+            else:  # > 60 km/h
+                return 'VEHÍCULO'
+        except (ValueError, TypeError):
+            return 'DETENIDO'
+
+    return udf(classify, StringType())
+
+
 def transform_locations(df: DataFrame) -> DataFrame:
     """
-    Aplica todas las transformaciones necesarias a los datos de ubicación
-    Campos de entrada: id, device_name, device_id, latitude, longitude,
-                       altitude, speed, battery, signal, sim_operator,
-                       network_type, timestamp
+    Transforma datos de Supabase de forma optimizada
+    - Mantiene latitud/longitud originales
+    - Clasifica hora en período del día (MAÑANA/TARDE/NOCHE)
+    - Clasifica altitud en rangos (BAJA/MEDIA/ALTA)
+    - Clasifica batería en niveles (CRITICO/BAJO/MEDIO/ALTO)
     """
-    logger.info("Starting data transformation...")
+    logger.info("Starting optimized data transformation...")
 
     # 1. Filtrar coordenadas inválidas
     df = df.filter(
@@ -26,41 +126,64 @@ def transform_locations(df: DataFrame) -> DataFrame:
         (col("longitude").between(-180, 180))
     )
 
-    # 2. Normalizar tipo de red
+    initial_count = df.count()
+    logger.info(f"Valid coordinates: {initial_count:,}")
+
+    # 2. Clasificar PERÍODO DEL DÍA (solo este campo, sin hour separado)
     df = df.withColumn(
-        "network_type_normalized",
-        when(col("network_type").isNull(), "unknown")
+        "period",
+        when((hour(col("timestamp")) >= 6) & (hour(col("timestamp")) < 12), "MAÑANA")
+        .when((hour(col("timestamp")) >= 12) & (hour(col("timestamp")) < 19), "TARDE")
+        .otherwise("NOCHE")
+    )
+
+    # 3. Clasificar ALTITUD (solo este campo, sin altitude original duplicado)
+    df = df.withColumn(
+        "altitude_range",
+        when(col("altitude").isNull(), None)
+        .when(col("altitude") <= 400, "BAJA")
+        .when(col("altitude") <= 500, "MEDIA")
+        .otherwise("ALTA")
+    )
+
+    # 4. Clasificar BATERÍA (solo este campo)
+    df = df.withColumn(
+        "battery_level",
+        when(col("battery").isNull(), None)
+        .when(col("battery") < 25, "CRITICO")
+        .when(col("battery") < 50, "BAJO")
+        .when(col("battery") < 75, "MEDIO")
+        .otherwise("ALTO")
+    )
+
+    # 5. Normalizar tipo de red (usando when/otherwise en lugar de UDF)
+    df = df.withColumn(
+        "network_type",
+        when(col("network_type").isNull(), "SIN DATOS")
+        .when(col("network_type").rlike("(?i)wifi|wi-fi"), "WiFi")
         .when(col("network_type").rlike("(?i)5G"), "5G")
-        .when(col("network_type").rlike("(?i)4G|LTE"), "4G")
-        .when(col("network_type").rlike("(?i)3G|HSDPA|HSPA|UMTS"), "3G")
-        .when(col("network_type").rlike("(?i)2G|EDGE|GPRS"), "2G")
-        .otherwise("unknown")
+        .when(col("network_type").rlike("(?i)4G|LTE|mobile"), "4G")
+        .when(col("network_type").rlike("(?i)3G|HSDPA|HSPA|UMTS|WCDMA"), "3G")
+        .when(col("network_type").rlike("(?i)2G|EDGE|GPRS|GSM"), "2G")
+        .otherwise("SIN DATOS")
     )
 
-    # 3. Clasificar estado de batería
-    df = df.withColumn(
-        "battery_status",
-        when(col("battery").isNull(), "unknown")
-        .when(col("battery") >= 75, "high")
-        .when(col("battery") >= 50, "medium")
-        .when(col("battery") >= 25, "low")
-        .otherwise("critical")
-    )
+    # Crear network_generation basado en network_type normalizado
+    df = df.withColumn("network_generation", col("network_type"))
 
-    # 4. Clasificar calidad de señal (asumiendo rango típico -120 a -40 dBm)
-    # Si tu campo signal tiene otro rango, ajusta estos valores
+    # 6. Clasificar calidad de señal (solo este campo)
     df = df.withColumn(
         "signal_quality",
-        when(col("signal").isNull(), "unknown")
-        .when(col("signal") >= -60, "excellent")
-        .when(col("signal") >= -70, "good")
-        .when(col("signal") >= -80, "fair")
-        .otherwise("poor")
+        when(col("signal").isNull(), None)
+        .when(col("signal") >= -60, "EXCELENTE")
+        .when(col("signal") >= -70, "BUENA")
+        .when(col("signal") >= -80, "REGULAR")
+        .otherwise("POBRE")
     )
 
-    # 5. Crear geometría WKT para PostGIS (POINT)
+    # 7. Crear geometría WKT para PostGIS
     df = df.withColumn(
-        "location",
+        "location_geom",
         concat(
             lit("SRID=4326;POINT("),
             col("longitude"),
@@ -70,53 +193,61 @@ def transform_locations(df: DataFrame) -> DataFrame:
         )
     )
 
-    # 6. Redondear coordenadas para mejor precisión (6 decimales ~ 10cm)
-    df = df.withColumn("latitude", spark_round(col("latitude"), 6))
-    df = df.withColumn("longitude", spark_round(col("longitude"), 6))
+    # 8. Extraer solo la fecha (sin hora)
+    df = df.withColumn("date", to_date(col("timestamp")))
 
-    # 7. Manejar valores nulos
-    df = df.withColumn(
-        "altitude",
-        when(col("altitude").isNull(), 0.0).otherwise(col("altitude"))
-    )
-    df = df.withColumn(
-        "speed",
-        when(col("speed").isNull(), 0.0).otherwise(col("speed"))
-    )
+    # 9. Manejar valores nulos en campos numéricos
+    df = df.withColumn("altitude", when(col("altitude").isNull(), 0.0).otherwise(col("altitude")))
+    df = df.withColumn("speed", when(col("speed").isNull(), 0.0).otherwise(col("speed")))
+    df = df.withColumn("battery", when(col("battery").isNull(), 0.0).otherwise(col("battery")))
+    df = df.withColumn("signal", when(col("signal").isNull(), 0.0).otherwise(col("signal")))
 
-    # 8. Agregar columnas de grilla para análisis espacial (0.01 grados ~ 1km)
-    df = df.withColumn("lat_grid", floor(col("latitude") / 0.01) * 0.01)
-    df = df.withColumn("lon_grid", floor(col("longitude") / 0.01) * 0.01)
-
-    # 9. Limpiar nombres de operadores (trimming y normalización)
+    # 10. Normalizar y limpiar operador (usando when/otherwise en lugar de UDF)
     df = df.withColumn(
         "sim_operator",
-        when(col("sim_operator").isNull(), "unknown")
+        when(col("sim_operator").isNull(), "SIN SEÑAL")
+        .when(col("sim_operator") == "", "SIN SEÑAL")
+        .when(col("sim_operator").rlike("(?i)unknown|sin señ|sin seal|n/a"), "SIN SEÑAL")
+        .when(col("sim_operator").rlike("(?i)entel|bomov|18vacunate|distancia|movil gsm|t-mobile"), "ENTEL")
+        .when(col("sim_operator").rlike("(?i)tigo"), "TIGO")
+        .when(col("sim_operator").rlike("(?i)viva"), "VIVA")
         .otherwise(col("sim_operator"))
     )
 
-    record_count = df.count()
-    logger.info(f"Transformation completed. Records: {record_count}")
+    # 11. Clasificar velocidad en rangos (usando when/otherwise en lugar de UDF)
+    # Convertir speed de m/s a km/h y clasificar
+    df = df.withColumn(
+        "speed_range",
+        when((col("speed").isNull()) | (col("speed") == 0), "DETENIDO")
+        .when(col("speed") * 3.6 <= 5, "CAMINANDO")
+        .when(col("speed") * 3.6 <= 10, "CORRIENDO")
+        .when(col("speed") * 3.6 <= 60, "TRANSPORTE PÚBLICO")
+        .otherwise("VEHÍCULO")
+    )
+
+    # 12. Crear grilla para análisis espacial (para heatmap)
+    df = df.withColumn("lat_grid", floor(col("latitude") / 0.01) * 0.01)
+    df = df.withColumn("lon_grid", floor(col("longitude") / 0.01) * 0.01)
+
+    final_count = df.count()
+    logger.info(f"✓ Transformation completed")
+    logger.info(f"  Input records: {initial_count:,}")
+    logger.info(f"  Output records: {final_count:,}")
+    logger.info(f"  Filtered out: {initial_count - final_count:,}")
 
     return df
 
 
 def aggregate_by_grid(df: DataFrame, grid_size: float = 0.01) -> DataFrame:
     """
-    Agrega datos por celdas de grilla (heatmap)
-    grid_size: tamaño de celda en grados (~1km = 0.01)
+    Agrega datos por celdas de grilla para heatmap
+    grid_size: 0.01 grados ≈ 1km
     """
-    logger.info(f"Aggregating by grid with size {grid_size}...")
+    logger.info(f"Creating grid aggregation (grid_size={grid_size})...")
 
     # Crear grilla
-    df_grid = df.withColumn(
-        "lat_grid",
-        floor(col("latitude") / grid_size) * grid_size
-    )
-    df_grid = df_grid.withColumn(
-        "lon_grid",
-        floor(col("longitude") / grid_size) * grid_size
-    )
+    df_grid = df.withColumn("lat_grid", floor(col("latitude") / grid_size) * grid_size)
+    df_grid = df_grid.withColumn("lon_grid", floor(col("longitude") / grid_size) * grid_size)
 
     # Agregar por celda
     aggregated = df_grid.groupBy("lat_grid", "lon_grid").agg(
@@ -128,9 +259,15 @@ def aggregate_by_grid(df: DataFrame, grid_size: float = 0.01) -> DataFrame:
         avg("speed").alias("avg_speed")
     )
 
-    # Crear polígono de la celda en formato WKT
+    # Redondear valores
+    aggregated = aggregated.withColumn("avg_battery", spark_round(col("avg_battery"), 2))
+    aggregated = aggregated.withColumn("avg_signal", spark_round(col("avg_signal"), 2))
+    aggregated = aggregated.withColumn("avg_altitude", spark_round(col("avg_altitude"), 2))
+    aggregated = aggregated.withColumn("avg_speed", spark_round(col("avg_speed"), 2))
+
+    # Crear polígono WKT de la celda
     aggregated = aggregated.withColumn(
-        "cell_polygon",
+        "cell_geom",
         concat(
             lit("SRID=4326;POLYGON(("),
             col("lon_grid"), lit(" "), col("lat_grid"), lit(","),
@@ -142,115 +279,100 @@ def aggregate_by_grid(df: DataFrame, grid_size: float = 0.01) -> DataFrame:
         )
     )
 
-    # Agregar grid_size como columna
     aggregated = aggregated.withColumn("grid_size", lit(grid_size))
 
-    # Redondear valores
-    aggregated = aggregated.withColumn("avg_battery", spark_round(col("avg_battery"), 2))
-    aggregated = aggregated.withColumn("avg_signal", spark_round(col("avg_signal"), 2))
-    aggregated = aggregated.withColumn("avg_altitude", spark_round(col("avg_altitude"), 2))
-    aggregated = aggregated.withColumn("avg_speed", spark_round(col("avg_speed"), 2))
-
     grid_count = aggregated.count()
-    logger.info(f"Grid aggregation completed. Grid cells: {grid_count}")
+    logger.info(f"✓ Grid created with {grid_count:,} cells")
 
     return aggregated
 
 
-def aggregate_by_device(df: DataFrame) -> DataFrame:
-    """
-    Agrega estadísticas por dispositivo
-    """
-    logger.info("Aggregating statistics by device...")
-
-    from pyspark.sql.functions import min as spark_min, max as spark_max
-
-    device_stats = df.groupBy("device_id", "device_name").agg(
-        count("*").alias("total_records"),
-        spark_min("timestamp").alias("first_seen"),
-        spark_max("timestamp").alias("last_seen"),
-        avg("battery").alias("avg_battery"),
-        avg("signal").alias("avg_signal"),
-        avg("speed").alias("avg_speed"),
-        avg("latitude").alias("most_common_lat"),
-        avg("longitude").alias("most_common_lon")
-    )
-
-    # Redondear valores
-    device_stats = device_stats.withColumn("avg_battery", spark_round(col("avg_battery"), 2))
-    device_stats = device_stats.withColumn("avg_signal", spark_round(col("avg_signal"), 2))
-    device_stats = device_stats.withColumn("avg_speed", spark_round(col("avg_speed"), 2))
-    device_stats = device_stats.withColumn("most_common_lat", spark_round(col("most_common_lat"), 6))
-    device_stats = device_stats.withColumn("most_common_lon", spark_round(col("most_common_lon"), 6))
-
-    return device_stats
-
-
-def filter_by_area(df: DataFrame, min_lat: float, max_lat: float,
-                   min_lon: float, max_lon: float) -> DataFrame:
-    """
-    Filtra puntos dentro de un área rectangular
-    """
-    return df.filter(
-        (col("latitude").between(min_lat, max_lat)) &
-        (col("longitude").between(min_lon, max_lon))
-    )
-
-
-def filter_by_network(df: DataFrame, network_type: str) -> DataFrame:
-    """
-    Filtra por tipo de red normalizado
-    """
-    return df.filter(col("network_type_normalized") == network_type)
-
-
-def filter_by_operator(df: DataFrame, operator: str) -> DataFrame:
-    """
-    Filtra por operador
-    """
-    return df.filter(col("sim_operator") == operator)
-
-
-def calculate_statistics(df: DataFrame) -> dict:
+def get_statistics(df: DataFrame) -> dict:
     """
     Calcula estadísticas generales del dataset
     """
     from pyspark.sql.functions import min as spark_min, max as spark_max
 
+    # Estadísticas generales
     stats = df.agg(
-        count("*").alias("total_count"),
-        countDistinct("device_id").alias("unique_devices"),
+        count("*").alias("total"),
+        countDistinct("device_id").alias("devices"),
         avg("battery").alias("avg_battery"),
         avg("signal").alias("avg_signal"),
         avg("speed").alias("avg_speed"),
+        avg("altitude").alias("avg_altitude"),
         spark_min("timestamp").alias("min_date"),
         spark_max("timestamp").alias("max_date")
     ).collect()[0]
 
-    # Distribución de tipos de red
-    network_dist = df.groupBy("network_type_normalized") \
+    # Distribución por período del día
+    period_dist = df.groupBy("period") \
+        .count() \
+        .orderBy(
+        when(col("period") == "MAÑANA", 1)
+        .when(col("period") == "TARDE", 2)
+        .otherwise(3)
+    ) \
+        .collect()
+
+    # Distribución por rango de altitud
+    altitude_dist = df.groupBy("altitude_range") \
+        .count() \
+        .orderBy(
+        when(col("altitude_range") == "BAJA", 1)
+        .when(col("altitude_range") == "MEDIA", 2)
+        .otherwise(3)
+    ) \
+        .collect()
+
+    # Distribución por nivel de batería
+    battery_dist = df.groupBy("battery_level") \
+        .count() \
+        .orderBy(
+        when(col("battery_level") == "CRITICO", 1)
+        .when(col("battery_level") == "BAJO", 2)
+        .when(col("battery_level") == "MEDIO", 3)
+        .otherwise(4)
+    ) \
+        .collect()
+
+    # Distribución por generación de red
+    network_dist = df.groupBy("network_generation") \
         .count() \
         .orderBy(col("count").desc()) \
         .collect()
 
-    # Distribución de operadores
+    # Distribución por operador
     operator_dist = df.groupBy("sim_operator") \
         .count() \
         .orderBy(col("count").desc()) \
         .collect()
 
     return {
-        "total_points": stats["total_count"],
-        "unique_devices": stats["unique_devices"],
+        "total_points": stats["total"],
+        "unique_devices": stats["devices"],
         "avg_battery": round(stats["avg_battery"], 2) if stats["avg_battery"] else 0,
         "avg_signal": round(stats["avg_signal"], 2) if stats["avg_signal"] else 0,
         "avg_speed": round(stats["avg_speed"], 2) if stats["avg_speed"] else 0,
+        "avg_altitude": round(stats["avg_altitude"], 2) if stats["avg_altitude"] else 0,
         "date_range": {
             "start": str(stats["min_date"]) if stats["min_date"] else None,
             "end": str(stats["max_date"]) if stats["max_date"] else None
         },
+        "period_distribution": [
+            {"period": row["period"], "count": row["count"]}
+            for row in period_dist
+        ],
+        "altitude_distribution": [
+            {"range": row["altitude_range"], "count": row["count"]}
+            for row in altitude_dist if row["altitude_range"]
+        ],
+        "battery_distribution": [
+            {"level": row["battery_level"], "count": row["count"]}
+            for row in battery_dist if row["battery_level"]
+        ],
         "network_distribution": [
-            {"network": row["network_type_normalized"], "count": row["count"]}
+            {"generation": row["network_generation"], "count": row["count"]}
             for row in network_dist
         ],
         "operator_distribution": [

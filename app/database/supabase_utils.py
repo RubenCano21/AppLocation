@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class SupabaseClient:
-    """Cliente mejorado para interactuar con Supabase REST API"""
+    """Cliente para interactuar con Supabase REST API"""
 
     def __init__(self):
         self.base_url = settings.SUPABASE_URL
@@ -86,45 +86,76 @@ class SupabaseClient:
             end_date: Optional[str] = None
     ) -> List[Dict]:
         """
-        Fetch todos los registros con paginación automática
+        Fetch todos los registros con paginación basada en cursor (ID)
+        Usa ID en lugar de offset para evitar problemas con grandes volúmenes
         """
         all_data = []
-        offset = 0
-        limit = settings.SUPABASE_FETCH_LIMIT
+        limit = min(settings.SUPABASE_FETCH_LIMIT, 10000)  # Reducir tamaño del lote
+        last_id = 0  # Empezar desde ID 0
+        batch_num = 0
+        max_retries = 3
 
         while True:
             url = f"{self.base_url}/rest/v1/{self.table}"
             params = {
                 "select": "*",
-                "limit": str(limit),
-                "offset": str(offset)
+                "id": f"gt.{last_id}",  # Mayor que el último ID procesado
+                "order": "id.asc",  # Ordenar por ID ascendente
+                "limit": str(limit)
             }
 
-            # Filtros de fecha
+            # Filtros de fecha (si se proporcionan)
             if start_date:
                 params["timestamp"] = f"gte.{start_date}"
             if end_date:
-                params["timestamp"] = f"lte.{end_date}"
+                # Si ya tenemos timestamp con gte, necesitamos combinar
+                if "timestamp" in params:
+                    # Supabase requiere sintaxis especial para rangos
+                    # Usar and con paréntesis
+                    params["and"] = f"(timestamp.gte.{start_date},timestamp.lte.{end_date})"
+                    del params["timestamp"]
+                else:
+                    params["timestamp"] = f"lte.{end_date}"
 
-            try:
-                resp = requests.get(url, headers=self.headers, params=params, timeout=60)
-                resp.raise_for_status()
-                data = resp.json()
-
-                if not data:
+            # Reintentar en caso de errores
+            for retry in range(max_retries):
+                try:
+                    resp = requests.get(url, headers=self.headers, params=params, timeout=120)
+                    resp.raise_for_status()
+                    data = resp.json()
                     break
+                except requests.exceptions.HTTPError as e:
+                    if e.response.status_code == 500 and retry < max_retries - 1:
+                        logger.warning(f"Error 500 en batch {batch_num + 1}, reintento {retry + 1}")
+                        import time
+                        time.sleep(2 ** retry)  # Backoff exponencial
+                        continue
+                    else:
+                        raise
+                except Exception as e:
+                    if retry < max_retries - 1:
+                        logger.warning(f"Error en batch {batch_num + 1}, reintento {retry + 1}: {e}")
+                        import time
+                        time.sleep(2 ** retry)
+                        continue
+                    else:
+                        raise
 
-                all_data.extend(data)
-                logger.info(f"Fetched batch {offset // limit + 1}: {len(data)} records")
+            if not data:
+                break
 
-                if len(data) < limit:
-                    break
+            all_data.extend(data)
+            batch_num += 1
 
-                offset += limit
+            # Actualizar el último ID procesado
+            last_id = max(record['id'] for record in data)
 
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Error in pagination at offset {offset}: {e}")
-                raise
+            logger.info(f"Fetched batch {batch_num}: {len(data)} records (last_id: {last_id})")
+
+            # Si recibimos menos registros que el límite, es la última página
+            if len(data) < limit:
+                break
+
 
         logger.info(f"Total records fetched: {len(all_data)}")
         return all_data

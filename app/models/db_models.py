@@ -1,12 +1,138 @@
 # app/models/db_models.py
-from sqlalchemy import Column, Integer, Float, String, DateTime, JSON, Index, BigInteger
+from sqlalchemy import Column, Integer, Float, String, DateTime, JSON, Index, BigInteger, ForeignKey
+from sqlalchemy.orm import relationship
 from geoalchemy2 import Geometry
 from app.database.postgres_db import Base
 from datetime import datetime
 
 
+# ==================== TABLAS DE DIMENSIÓN ====================
+
+class DimTime(Base):
+    """Dimensión de Tiempo"""
+    __tablename__ = "dim_time"
+
+    id = Column(Integer, primary_key=True, index=True)
+    period = Column(String(20), nullable=False)  # MAÑANA, TARDE, NOCHE
+
+    __table_args__ = (
+
+        Index('idx_dim_time_period', 'period'),
+    )
+
+
+class DimAltitude(Base):
+    """Dimensión de Altitud"""
+    __tablename__ = "dim_altitude"
+
+    id = Column(Integer, primary_key=True, index=True)
+    altitude_range = Column(String(20), nullable=False)  # BAJA, MEDIA, ALTA
+
+    __table_args__ = (
+        Index('idx_dim_altitude_range', 'altitude_range'),
+    )
+
+
+class DimBattery(Base):
+    """Dimensión de Batería"""
+    __tablename__ = "dim_battery"
+
+    id = Column(Integer, primary_key=True, index=True)
+    battery_level = Column(String(20), nullable=False)  # CRITICO, BAJO, MEDIO, ALTO
+
+    __table_args__ = (
+        Index('idx_dim_battery_level', 'battery_level'),
+    )
+
+
+class DimNetwork(Base):
+    """Dimensión de Tipo de Red"""
+    __tablename__ = "dim_network"
+
+    id = Column(Integer, primary_key=True, index=True)
+    network_normalized = Column(String(20))  # 2G, 3G, 4G, 5G
+
+    __table_args__ = (
+        Index('idx_dim_network_normalized', 'network_normalized'),
+    )
+
+
+class DimOperator(Base):
+    """Dimensión de Operador"""
+    __tablename__ = "dim_operator"
+
+    id = Column(Integer, primary_key=True, index=True)
+    operator_name = Column(String(100), unique=True, nullable=False)
+
+    __table_args__ = (
+        Index('idx_dim_operator_name', 'operator_name'),
+    )
+
+
+class DimDevice(Base):
+    """Dimensión de Dispositivo"""
+    __tablename__ = "dim_device"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String(100), unique=True, nullable=False)
+    device_name = Column(String(100))
+
+    __table_args__ = (
+        Index('idx_dim_device_id', 'device_id'),
+    )
+
+
+# ==================== TABLA DE HECHOS ====================
+
+class FactLocation(Base):
+    """Tabla de hechos con referencias a dimensiones"""
+    __tablename__ = "fact_locations"
+
+    id = Column(BigInteger, primary_key=True)
+
+    # Foreign Keys a dimensiones
+    time_id = Column(Integer, ForeignKey('dim_time.id'), nullable=False)
+    altitude_id = Column(Integer, ForeignKey('dim_altitude.id'))
+    battery_id = Column(Integer, ForeignKey('dim_battery.id'))
+    network_id = Column(Integer, ForeignKey('dim_network.id'))
+    operator_id = Column(Integer, ForeignKey('dim_operator.id'))
+    device_id = Column(Integer, ForeignKey('dim_device.id'), nullable=False)
+
+    # Datos de medición (hechos)
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    altitude_value = Column(Float)
+    speed = Column(Float)
+    battery_value = Column(Float)
+    signal = Column(Float)
+
+    # Geometría
+    location = Column(Geometry('POINT', srid=4326))
+
+    # Timestamps
+    timestamp = Column(DateTime, nullable=False, index=True)
+
+    # Relaciones
+    time = relationship("DimTime")
+    altitude_dim = relationship("DimAltitude")
+    battery_dim = relationship("DimBattery")
+    network = relationship("DimNetwork")
+    operator = relationship("DimOperator")
+    device = relationship("DimDevice")
+
+    __table_args__ = (
+        Index('idx_fact_location_gist', 'location', postgresql_using='gist'),
+        Index('idx_fact_timestamp', 'timestamp'),
+        Index('idx_fact_date', 'date'),
+        Index('idx_fact_time_id', 'time_id'),
+        Index('idx_fact_device_id', 'device_id'),
+    )
+
+
 class Location(Base):
-    """Tabla principal de ubicaciones transformadas desde Supabase"""
+    """
+    Tabla única optimizada con todos los datos transformados
+    """
     __tablename__ = "locations"
 
     # ID original de Supabase
@@ -14,153 +140,84 @@ class Location(Base):
 
     # Información del dispositivo
     device_name = Column(String(100))
-    device_id = Column(String(100), index=True)
+    device_id = Column(String(100), index=True, nullable=False)
 
-    # Coordenadas originales
+    # ============ COORDENADAS ORIGINALES (sin modificar) ============
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
-    altitude = Column(Float)
-    speed = Column(Float)
 
-    # Geometría PostGIS
-    location = Column(Geometry('POINT', srid=4326))
+    # ============ VALORES NUMÉRICOS ORIGINALES ============
+    altitude = Column(Float)  # metros sobre el nivel del mar
+    speed = Column(Float)  # m/s
+    battery = Column(Float)  # porcentaje 0-100
+    signal = Column(Float)  # dBm
 
-    # Información de red y dispositivo
-    battery = Column(Float)
-    signal = Column(Float)
+    # ============ DATOS DE RED ============
+    network_type = Column(String(50))  # Tipo original (ej: "LTE", "5G NR")
+    network_generation = Column(String(20))  # Clasificado: 2G, 3G, 4G, 5G, UNKNOWN
     sim_operator = Column(String(100))
-    network_type = Column(String(50))
 
-    # Campos transformados
-    network_type_normalized = Column(String(20))  # 2G, 3G, 4G, 5G, unknown
-    battery_status = Column(String(20))  # critical, low, medium, high
-    signal_quality = Column(String(20))  # poor, fair, good, excellent
+    # ============ CLASIFICACIONES TRANSFORMADAS ============
+    period = Column(String(20), index=True)  # MAÑANA, TARDE, NOCHE
+    altitude_range = Column(String(20))  # BAJA, MEDIA, ALTA
+    battery_level = Column(String(20), index=True)  # CRITICO, BAJO, MEDIO, ALTO
+    signal_quality = Column(String(20))  # POBRE, REGULAR, BUENA, EXCELENTE
+    speed_range = Column(String(30))  # DETENIDO, CAMINANDO, CORRIENDO, TRANSPORTE PÚBLICO, VEHÍCULO
 
-    # Timestamp original
-    timestamp = Column(DateTime, index=True)
+    # ============ DATOS TEMPORALES ============
+    timestamp = Column(DateTime, nullable=False, index=True)  # Fecha y hora completa
+    date = Column(DateTime, index=True)  # Solo fecha
 
-    # Timestamp de procesamiento
-    processed_at = Column(DateTime, default=datetime.utcnow)
+    # ============ GEOMETRÍA POSTGIS ============
+    location_geom = Column(Geometry('POINT', srid=4326))
 
-    # Grilla para análisis espacial
+    # ============ GRILLA PARA HEATMAP ============
     lat_grid = Column(Float)
     lon_grid = Column(Float)
 
-    # Índices espaciales y de búsqueda
+    # ============ METADATA ============
+    processed_at = Column(DateTime, default=datetime.utcnow)
+
+    # Índices para optimizar consultas
     __table_args__ = (
-        Index('idx_location_gist', 'location', postgresql_using='gist'),
+        Index('idx_location_geom_gist', 'location_geom', postgresql_using='gist'),
         Index('idx_timestamp', 'timestamp'),
+        Index('idx_date', 'date'),
         Index('idx_device_id', 'device_id'),
-        Index('idx_network_type', 'network_type_normalized'),
-        Index('idx_battery_status', 'battery_status'),
+        Index('idx_period', 'period'),
+        Index('idx_battery_level', 'battery_level'),
         Index('idx_grid', 'lat_grid', 'lon_grid'),
     )
 
 
-class DistrictAnalysis(Base):
-    """Análisis agregado por distrito/barrio"""
-    __tablename__ = "district_analysis"
-
-    id = Column(Integer, primary_key=True, index=True)
-    district_name = Column(String(100), nullable=False, unique=True)
-    district_code = Column(String(50))
-
-    # Geometría del distrito
-    polygon = Column(Geometry('POLYGON', srid=4326))
-    area_km2 = Column(Float)
-
-    # Estadísticas de puntos
-    point_count = Column(Integer, default=0)
-    density = Column(Float)  # puntos por km²
-    unique_devices = Column(Integer, default=0)
-
-    # Promedios
-    avg_battery = Column(Float)
-    avg_signal = Column(Float)
-    avg_altitude = Column(Float)
-    avg_speed = Column(Float)
-
-    # Distribuciones (JSON)
-    network_distribution = Column(JSON)  # {"4G": 120, "5G": 80, "3G": 10}
-    operator_distribution = Column(JSON)  # {"Entel": 150, "Tigo": 100}
-    battery_distribution = Column(JSON)  # {"high": 80, "medium": 100, ...}
-
-    # Timestamps
-    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    __table_args__ = (
-        Index('idx_district_polygon_gist', 'polygon', postgresql_using='gist'),
-    )
-
-
 class GridAnalysis(Base):
-    """Análisis por grilla (heatmap)"""
+    """
+    Tabla agregada para heatmap (análisis por grilla)
+    """
     __tablename__ = "grid_analysis"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
 
-    # Coordenadas de la celda de la grilla
+    # Coordenadas de la celda
     lat_grid = Column(Float, nullable=False)
     lon_grid = Column(Float, nullable=False)
-    grid_size = Column(Float, default=0.01)  # ~1km
+    grid_size = Column(Float, default=0.01)
 
     # Geometría de la celda
-    cell_polygon = Column(Geometry('POLYGON', srid=4326))
+    cell_geom = Column(Geometry('POLYGON', srid=4326))
 
     # Estadísticas agregadas
     point_count = Column(Integer, default=0)
     unique_devices = Column(Integer, default=0)
-
-    # Promedios
     avg_battery = Column(Float)
     avg_signal = Column(Float)
     avg_altitude = Column(Float)
     avg_speed = Column(Float)
 
-    # Distribuciones
-    network_distribution = Column(JSON)
-    operator_distribution = Column(JSON)
-
     # Timestamp
-    last_updated = Column(DateTime, default=datetime.utcnow)
-
-    __table_args__ = (
-        Index('idx_grid_unique', 'lat_grid', 'lon_grid', unique=True),
-        Index('idx_grid_cell_gist', 'cell_polygon', postgresql_using='gist'),
-    )
-
-
-class DeviceStatistics(Base):
-    """Estadísticas por dispositivo"""
-    __tablename__ = "device_statistics"
-
-    id = Column(Integer, primary_key=True, index=True)
-    device_id = Column(String(100), unique=True, nullable=False)
-    device_name = Column(String(100))
-
-    # Contadores
-    total_records = Column(Integer, default=0)
-    first_seen = Column(DateTime)
-    last_seen = Column(DateTime)
-
-    # Promedios
-    avg_battery = Column(Float)
-    avg_signal = Column(Float)
-    avg_speed = Column(Float)
-
-    # Ubicación más común
-    most_common_lat = Column(Float)
-    most_common_lon = Column(Float)
-
-    # Distribuciones
-    network_distribution = Column(JSON)
-    operator_distribution = Column(JSON)
-
-    # Timestamps
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     __table_args__ = (
-        Index('idx_device_id', 'device_id'),
-        Index('idx_last_seen', 'last_seen'),
+        Index('idx_grid_unique', 'lat_grid', 'lon_grid', unique=True),
+        Index('idx_grid_cell_gist', 'cell_geom', postgresql_using='gist'),
     )
