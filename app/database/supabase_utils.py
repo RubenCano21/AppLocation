@@ -83,15 +83,18 @@ class SupabaseClient:
     def fetch_all_paginated(
             self,
             start_date: Optional[str] = None,
-            end_date: Optional[str] = None
+            end_date: Optional[str] = None,
+            last_id: Optional[int] = None
     ) -> List[Dict]:
         """
         Fetch todos los registros con paginación basada en cursor (ID)
         Usa ID en lugar de offset para evitar problemas con grandes volúmenes
+        Si last_id se proporciona, solo trae registros con ID > last_id
         """
+        global data
         all_data = []
         limit = min(settings.SUPABASE_FETCH_LIMIT, 10000)  # Reducir tamaño del lote
-        last_id = 0  # Empezar desde ID 0
+        current_last_id = last_id if last_id else 0  # Usar last_id si se proporciona, sino empezar desde 0
         batch_num = 0
         max_retries = 3
 
@@ -99,7 +102,7 @@ class SupabaseClient:
             url = f"{self.base_url}/rest/v1/{self.table}"
             params = {
                 "select": "*",
-                "id": f"gt.{last_id}",  # Mayor que el último ID procesado
+                "id": f"gt.{current_last_id}",  # Mayor que el último ID procesado
                 "order": "id.asc",  # Ordenar por ID ascendente
                 "limit": str(limit)
             }
@@ -148,9 +151,9 @@ class SupabaseClient:
             batch_num += 1
 
             # Actualizar el último ID procesado
-            last_id = max(record['id'] for record in data)
+            current_last_id = max(record['id'] for record in data)
 
-            logger.info(f"Fetched batch {batch_num}: {len(data)} records (last_id: {last_id})")
+            logger.info(f"Fetched batch {batch_num}: {len(data)} records (last_id: {current_last_id})")
 
             # Si recibimos menos registros que el límite, es la última página
             if len(data) < limit:

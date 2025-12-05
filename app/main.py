@@ -9,6 +9,19 @@ load_dotenv()
 
 app = FastAPI()
 
+# Importar y registrar routers
+try:
+    from app.routes.district_routes import router as district_router
+    app.include_router(district_router)
+except Exception as e:
+    print(f"Warning: Could not load district routes: {e}")
+
+try:
+    from app.routes.province_routes import router as province_router
+    app.include_router(province_router)
+except Exception as e:
+    print(f"Warning: Could not load province routes: {e}")
+
 DB_HOST = os.getenv("DEST_PG_HOST")
 DB_PORT = int(os.getenv("DEST_PG_PORT", "5432"))
 DB_NAME = os.getenv("DEST_PG_DB")

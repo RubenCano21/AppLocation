@@ -4,29 +4,44 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="0f95d42e-95b3-4526-8f74-967270033700" name="Changes" comment="coneccion con supabase">
-      <change afterPath="$PROJECT_DIR$/app/services/dimension_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docs/TIMESTAMP_DESCENTRALIZACION.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docs/TIMESTAMP_DESCENTRALIZACION_COMPLETADA.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/migrations/add_speed_range_field.sql" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/migrations/add_timestamp_fields.sql" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/etl_spark_to_db.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_analyze_speed.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_bd_connection.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_group_by_network.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_group_by_operator.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_group_by_speed.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_postgis.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_supabase.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/verificar_bd.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/sqldialects.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/sqldialects.xml" afterDir="false" />
+    <list default="true" id="0f95d42e-95b3-4526-8f74-967270033700" name="Changes" comment="descentralizando los campos, solo falta las zonas">
+      <change afterPath="$PROJECT_DIR$/ETL_AUTOMATICO.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/models/etl_control.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/routes/district_routes.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/routes/province_routes.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/scheduler/etl_scheduler.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/services/district_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/services/location_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/services/province_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/migrations/add_geographic_location_fields.sql" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/santa_cruz_provincias.geojson" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/add_geographic_columns.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/assign_geographic_location.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/create_etl_control_table.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/init_districts.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/load_districts.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/load_districts_auto.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/load_districts_embedded.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/load_districts_simple.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/load_provinces.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/run_migration_geographic.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/test_provinces.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/scripts/verify_districts.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/start_scheduler.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/show_geographic_points.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_densidad_distritos.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_districts.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_geographic_assignment.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_incremental_etl.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_puntos_distrito.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_puntos_interes.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/database/supabase_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/database/supabase_utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/main.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/models/db_models.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/models/db_models.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/services/etl_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/services/etl_service.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/spark/transformations.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/spark/transformations.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/spark_job.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/spark_job.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/run_etl.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/run_etl.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -58,7 +73,7 @@
   }
 }</component>
   <component name="HttpClientEndpointsTabState">
-    <option name="cachedRequestData" value="&lt;CachedHttpClientTabRequests&gt;&#10;  &lt;entry key=&quot;c7fba67d449d42848ff55aa7b96cda275ff6c936&quot; value=&quot;###&amp;#10;GET http://localhost:8000/results&quot; /&gt;&#10;&lt;/CachedHttpClientTabRequests&gt;" />
+    <option name="cachedRequestData" value="&lt;CachedHttpClientTabRequests&gt;&#10;  &lt;entry key=&quot;91d70e51c27571d679e957c2b5ec7bfa6e146511&quot; value=&quot;###&amp;#10;GET http://localhost:8000/districts/&quot; /&gt;&#10;&lt;/CachedHttpClientTabRequests&gt;" />
   </component>
   <component name="HttpClientOnboardingState">{
   &quot;isOnboardingCommentShown&quot;: true
@@ -105,13 +120,13 @@
     "git-widget-placeholder": "master",
     "ignore.virus.scanning.warn.message": "true",
     "junie.onboarding.icon.badge.shown": "true",
-    "last_opened_file_path": "D:/UAGRM/SOPORTE/AppLocation/backend",
+    "last_opened_file_path": "D:/UAGRM/SOPORTE/AppLocation",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",
     "node.js.selected.package.tslint": "(autodetect)",
     "nodejs_package_manager_path": "npm",
-    "settings.editor.selected.configurable": "preferences.pluginManager",
+    "settings.editor.selected.configurable": "configurable.group.tools",
     "to.speed.mode.migration.done": "true",
     "vue.rearranger.settings.migration": "true"
   },
@@ -126,6 +141,7 @@
 }]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="D:\UAGRM\SOPORTE\AppLocation" />
       <recent name="D:\UAGRM\SOPORTE\AppLocation\backend" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
@@ -298,7 +314,8 @@
       <workItem from="1764711390946" duration="8407000" />
       <workItem from="1764733596437" duration="2322000" />
       <workItem from="1764741504377" duration="13783000" />
-      <workItem from="1764799798067" duration="29466000" />
+      <workItem from="1764799798067" duration="33665000" />
+      <workItem from="1764913396488" duration="6495000" />
     </task>
     <task id="LOCAL-00001" summary="first commit">
       <option name="closed" value="true" />
@@ -332,7 +349,23 @@
       <option name="project" value="LOCAL" />
       <updated>1764743245665</updated>
     </task>
-    <option name="localTasksCounter" value="5" />
+    <task id="LOCAL-00005" summary="descentralizando los campos, solo falta las zonas">
+      <option name="closed" value="true" />
+      <created>1764877891802</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1764877891802</updated>
+    </task>
+    <task id="LOCAL-00006" summary="descentralizando los campos, solo falta las zonas">
+      <option name="closed" value="true" />
+      <created>1764877905065</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1764877905065</updated>
+    </task>
+    <option name="localTasksCounter" value="7" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -352,7 +385,8 @@
   <component name="VcsManagerConfiguration">
     <MESSAGE value="first commit" />
     <MESSAGE value="coneccion con supabase" />
-    <option name="LAST_COMMIT_MESSAGE" value="coneccion con supabase" />
+    <MESSAGE value="descentralizando los campos, solo falta las zonas" />
+    <option name="LAST_COMMIT_MESSAGE" value="descentralizando los campos, solo falta las zonas" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/AppLocation$migrate_supabase_to_postgres.coverage" NAME="migrate_supabase_to_postgres Coverage Results" MODIFIED="1764834538366" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
@@ -370,7 +404,7 @@
     <SUITE FILE_PATH="coverage/AppLocation$AppLocation.coverage" NAME="AppLocation Coverage Results" MODIFIED="1764711548329" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
     <SUITE FILE_PATH="coverage/AppLocation$test_extraction.coverage" NAME="test_extraction Coverage Results" MODIFIED="1764743177109" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/tests" />
     <SUITE FILE_PATH="coverage/AppLocation$test_group_by_operator.coverage" NAME="test_group_by_operator Coverage Results" MODIFIED="1764873011685" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/tests" />
-    <SUITE FILE_PATH="coverage/AppLocation$run_etl.coverage" NAME="run_etl Coverage Results" MODIFIED="1764874672051" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/tests" />
+    <SUITE FILE_PATH="coverage/AppLocation$run_etl.coverage" NAME="run_etl Coverage Results" MODIFIED="1764918538905" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/tests" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

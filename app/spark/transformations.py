@@ -5,10 +5,76 @@ from pyspark.sql.functions import (
     round as spark_round, floor, countDistinct,
     hour, to_date, udf
 )
-from pyspark.sql.types import StringType
+from pyspark.sql.types import StringType, IntegerType, StructType, StructField
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def get_districts_and_provinces_data(spark, postgres_url, postgres_user, postgres_password):
+    """
+    Carga datos de distritos y provincias desde PostgreSQL para hacer join
+
+    Returns:
+        tuple: (districts_df, provinces_df)
+    """
+    try:
+        # Cargar distritos con sus geometrías como WKT
+        districts_df = spark.read \
+            .format("jdbc") \
+            .option("url", postgres_url) \
+            .option("dbtable", "(SELECT id, district_number, district_name, ST_AsText(geometry) as geom_wkt FROM districts) as districts_data") \
+            .option("user", postgres_user) \
+            .option("password", postgres_password) \
+            .option("driver", "org.postgresql.Driver") \
+            .load()
+
+        # Cargar provincias
+        provinces_df = spark.read \
+            .format("jdbc") \
+            .option("url", postgres_url) \
+            .option("dbtable", "(SELECT id, province_name, ST_AsText(geometry) as geom_wkt FROM provinces) as provinces_data") \
+            .option("user", postgres_user) \
+            .option("password", postgres_password) \
+            .option("driver", "org.postgresql.Driver") \
+            .load()
+
+        logger.info(f"✓ Loaded {districts_df.count()} districts and {provinces_df.count()} provinces for spatial join")
+
+        return districts_df, provinces_df
+
+    except Exception as e:
+        logger.error(f"Error loading geographic data: {e}")
+        return None, None
+
+
+def assign_district_udf(districts_broadcast):
+    """
+    UDF para asignar distrito basado en coordenadas
+    Usa búsqueda simple por distancia aproximada
+    """
+    def find_district(lat, lon):
+        if lat is None or lon is None:
+            return None, None
+
+        districts = districts_broadcast.value
+        # Buscar distrito más cercano (aproximación simple)
+        # En producción, se debería usar ST_Contains en PostgreSQL
+        min_dist = float('inf')
+        closest_district = None
+
+        for district in districts:
+            # Simplificación: usar distancia euclidiana
+            # En realidad necesitaríamos parsear la geometría WKT
+            # Por ahora retornamos None para que se haga en PostgreSQL
+            pass
+
+        return None, None
+
+    return udf(find_district, StructType([
+        StructField("district_id", IntegerType(), True),
+        StructField("district_name", StringType(), True)
+    ]))
 
 
 def normalize_operator_udf():
@@ -228,6 +294,13 @@ def transform_locations(df: DataFrame) -> DataFrame:
     # 12. Crear grilla para análisis espacial (para heatmap)
     df = df.withColumn("lat_grid", floor(col("latitude") / 0.01) * 0.01)
     df = df.withColumn("lon_grid", floor(col("longitude") / 0.01) * 0.01)
+
+    # 13. Agregar columnas de ubicación geográfica (inicialmente NULL)
+    # Estas se llenarán después en PostgreSQL con consultas espaciales
+    df = df.withColumn("district_id", lit(None).cast(IntegerType()))
+    df = df.withColumn("district_name", lit(None).cast(StringType()))
+    df = df.withColumn("province_id", lit(None).cast(IntegerType()))
+    df = df.withColumn("province_name", lit(None).cast(StringType()))
 
     final_count = df.count()
     logger.info(f"✓ Transformation completed")

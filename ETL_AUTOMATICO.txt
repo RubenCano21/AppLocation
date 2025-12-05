@@ -1,0 +1,106 @@
+ETL AUTOMÁTICO INCREMENTAL - CONFIGURADO
+
+CARACTERÍSTICAS:
+================
+
+✓ ETL automático cada 30 minutos (configurable)
+✓ Modo incremental: solo carga datos nuevos
+✓ NO elimina datos existentes
+✓ Rastrea último ID procesado
+✓ Asignación automática de distrito y provincia
+
+COMPONENTES CREADOS:
+====================
+
+1. Tabla de control: etl_control
+   - Rastrea cada ejecución
+   - Guarda último ID procesado
+   - Permite recuperación incremental
+
+2. Scheduler automático: app/scheduler/etl_scheduler.py
+   - Ejecuta ETL cada N minutos
+   - Maneja errores y reintentos
+
+3. Scripts:
+   - start_scheduler.py - Iniciar scheduler
+   - tests/test_incremental_etl.py - Probar una vez
+   - scripts/create_etl_control_table.py - Crear tabla
+
+USO:
+====
+
+OPCIÓN 1: EJECUTAR UNA VEZ (PRUEBA)
+------------------------------------
+C:\Users\Usuario\AppData\Local\Programs\Python\Python311\python.exe tests/test_incremental_etl.py
+
+OPCIÓN 2: SCHEDULER AUTOMÁTICO (PRODUCCIÓN)
+--------------------------------------------
+# Cada 30 minutos (por defecto)
+C:\Users\Usuario\AppData\Local\Programs\Python\Python311\python.exe start_scheduler.py
+
+# Cada 60 minutos
+C:\Users\Usuario\AppData\Local\Programs\Python\Python311\python.exe start_scheduler.py --interval 60
+
+# Cada 15 minutos
+C:\Users\Usuario\AppData\Local\Programs\Python\Python311\python.exe start_scheduler.py --interval 15
+
+CÓMO FUNCIONA:
+==============
+
+1. Primera ejecución:
+   - Carga TODOS los datos de Supabase
+   - Guarda el último ID procesado
+
+2. Siguientes ejecuciones:
+   - Lee último ID de la tabla etl_control
+   - Solo trae registros con ID > último_id
+   - Usa modo APPEND (no elimina datos)
+   - Actualiza distrito y provincia solo de nuevos registros
+
+3. Proceso completo:
+   EXTRACCIÓN → TRANSFORMACIÓN → CARGA → ASIGNACIÓN GEOGRÁFICA → REGISTRO
+
+VENTAJAS:
+=========
+
+✓ Más rápido (solo procesa datos nuevos)
+✓ No pierde datos históricos
+✓ Menos carga en Supabase
+✓ Automático y desatendido
+✓ Recuperable ante errores
+
+CONSULTAS ÚTILES:
+=================
+
+-- Ver historial de ejecuciones
+SELECT * FROM etl_control ORDER BY execution_date DESC LIMIT 10;
+
+-- Última ejecución exitosa
+SELECT * FROM etl_control WHERE status = 'SUCCESS' ORDER BY execution_date DESC LIMIT 1;
+
+-- Total de registros procesados hoy
+SELECT SUM(records_processed) FROM etl_control
+WHERE DATE(execution_date) = CURRENT_DATE;
+
+MONITOREO:
+==========
+
+El scheduler mostrará en consola:
+- Hora de cada ejecución
+- Registros procesados
+- Tiempo de ejecución
+- Próxima ejecución programada
+
+DETENER:
+========
+
+Presionar Ctrl+C en la terminal donde corre el scheduler
+
+REINICIAR:
+==========
+
+Si algo falla, simplemente volver a ejecutar:
+C:\Users\Usuario\AppData\Local\Programs\Python\Python311\python.exe start_scheduler.py
+
+El sistema automáticamente detectará el último ID procesado y continuará.
+

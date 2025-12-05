@@ -62,7 +62,8 @@ class ETLService:
     async def extract_from_supabase(
             self,
             start_date: Optional[str] = None,
-            end_date: Optional[str] = None
+            end_date: Optional[str] = None,
+            last_id: Optional[int] = None
     ) -> list:
         """Extrae datos de Supabase"""
         try:
@@ -70,9 +71,13 @@ class ETLService:
             logger.info("EXTRACTING FROM SUPABASE")
             logger.info("=" * 70)
 
+            if last_id:
+                logger.info(f"Incremental load from ID > {last_id}")
+
             all_data = self.supabase.fetch_all_paginated(
                 start_date=start_date,
-                end_date=end_date
+                end_date=end_date,
+                last_id=last_id
             )
 
             logger.info(f"✓ Extracted {len(all_data):,} records")
@@ -190,21 +195,41 @@ class ETLService:
             self,
             start_date: Optional[str] = None,
             end_date: Optional[str] = None,
-            force_refresh: bool = False
+            incremental: bool = True
     ) -> Dict:
-        """Ejecuta ETL completo"""
+        """Ejecuta ETL completo con modo incremental"""
         start_time = time.time()
 
         try:
             logger.info("\n" + "=" * 70)
-            logger.info("FULL ETL PIPELINE")
+            logger.info(f"ETL PIPELINE - {'INCREMENTAL' if incremental else 'FULL REFRESH'}")
             logger.info("=" * 70)
 
+            # Obtener último ID procesado si es incremental
+            last_id = None
+            if incremental:
+                from app.database.postgres_db import SessionLocal
+                from app.models.etl_control import ETLControl
+                db = SessionLocal()
+                try:
+                    last_run = db.query(ETLControl).filter(
+                        ETLControl.status == 'SUCCESS'
+                    ).order_by(ETLControl.execution_date.desc()).first()
+
+                    if last_run:
+                        last_id = last_run.last_processed_id
+                        logger.info(f"Last processed ID: {last_id}")
+                    else:
+                        logger.info("No previous run found, loading all data")
+                finally:
+                    db.close()
+
             # 1. Extract
-            raw_data = await self.extract_from_supabase(start_date, end_date)
+            raw_data = await self.extract_from_supabase(start_date, end_date, last_id)
 
             if not raw_data:
-                return {"status": "warning", "message": "No data found"}
+                logger.info("No new data to process")
+                return {"status": "warning", "message": "No new data"}
 
             # 2. Transform
             df_transformed, df_grid, statistics = self.transform_with_spark(raw_data)
@@ -217,7 +242,9 @@ class ETLService:
             logger.info("LOADING TO POSTGRESQL")
             logger.info("=" * 70)
 
-            mode = "overwrite" if force_refresh else "append"
+            # Usar append para carga incremental, overwrite si no es incremental
+            mode = "append" if incremental else "overwrite"
+            logger.info(f"Load mode: {mode}")
 
             # Debug: mostrar columnas disponibles
             logger.info(f"Available columns in DataFrame: {df_transformed.columns}")
@@ -227,24 +254,64 @@ class ETLService:
             if 'processed_at' not in df_transformed.columns:
                 df_transformed = df_transformed.withColumn('processed_at', current_timestamp())
 
-            # Cargar tabla principal - usar overwrite para evitar conflictos de schema
+            # Cargar tabla principal
             records_loaded = self.load_to_postgres(
                 df_transformed,
                 "locations",
-                mode="overwrite"  # Usar overwrite para evitar conflictos de schema
+                mode=mode
             )
 
-            # Cargar grilla
+            # Cargar grilla (siempre overwrite porque es agregación)
             records_grid = self.load_to_postgres(df_grid, "grid_analysis", mode="overwrite")
+
+            # 4. Asignar distrito y provincia a cada punto
+            logger.info("\n" + "=" * 70)
+            logger.info("ASIGNANDO UBICACIÓN GEOGRÁFICA")
+            logger.info("=" * 70)
+
+            from app.database.postgres_db import SessionLocal
+            from app.services.location_service import bulk_assign_geographic_location
+
+            db = SessionLocal()
+            try:
+                rows_updated = bulk_assign_geographic_location(db)
+                logger.info(f"✓ {rows_updated:,} puntos asignados a distrito y provincia")
+            except Exception as e:
+                logger.error(f"✗ Error asignando ubicaciones: {e}")
+            finally:
+                db.close()
+
+            # 5. Registrar ejecución exitosa
+            max_id = max([r['id'] for r in raw_data])
+            db = SessionLocal()
+            try:
+                from app.models.etl_control import ETLControl
+                from datetime import datetime
+                control = ETLControl(
+                    execution_date=datetime.utcnow(),
+                    last_processed_id=max_id,
+                    records_processed=records_loaded,
+                    status='SUCCESS',
+                    execution_time_seconds=int(time.time() - start_time)
+                )
+                db.add(control)
+                db.commit()
+                logger.info(f"✓ ETL control registered (last_id: {max_id})")
+            except Exception as e:
+                logger.error(f"Error registering control: {e}")
+            finally:
+                db.close()
 
             execution_time = time.time() - start_time
 
             logger.info("\n" + "=" * 70)
             logger.info("✓ ETL COMPLETED")
             logger.info("=" * 70)
+            logger.info(f"Mode: {'INCREMENTAL' if incremental else 'FULL'}")
             logger.info(f"Time: {execution_time:.2f}s")
             logger.info(f"Records: {records_loaded:,}")
             logger.info(f"Grid cells: {records_grid:,}")
+            logger.info(f"Last ID: {max_id}")
             logger.info("=" * 70 + "\n")
 
             return {
@@ -253,6 +320,7 @@ class ETLService:
                 "records_inserted": records_loaded,
                 "grid_cells": records_grid,
                 "execution_time": round(execution_time, 2),
+                "last_id": max_id,
                 "statistics": statistics
             }
 

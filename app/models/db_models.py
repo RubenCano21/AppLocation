@@ -4,6 +4,7 @@ from sqlalchemy.orm import relationship
 from geoalchemy2 import Geometry
 from app.database.postgres_db import Base
 from datetime import datetime
+from app.models.etl_control import ETLControl
 
 
 # ==================== TABLAS DE DIMENSIÓN ====================
@@ -123,7 +124,6 @@ class FactLocation(Base):
     __table_args__ = (
         Index('idx_fact_location_gist', 'location', postgresql_using='gist'),
         Index('idx_fact_timestamp', 'timestamp'),
-        Index('idx_fact_date', 'date'),
         Index('idx_fact_time_id', 'time_id'),
         Index('idx_fact_device_id', 'device_id'),
     )
@@ -171,6 +171,12 @@ class Location(Base):
     # ============ GEOMETRÍA POSTGIS ============
     location_geom = Column(Geometry('POINT', srid=4326))
 
+    # ============ UBICACIÓN GEOGRÁFICA ============
+    district_id = Column(Integer, ForeignKey('districts.id'), nullable=True)
+    district_name = Column(String(100), index=True)  # Nombre del distrito
+    province_id = Column(Integer, ForeignKey('provinces.id'), nullable=True)
+    province_name = Column(String(200), index=True)  # Nombre de la provincia
+
     # ============ GRILLA PARA HEATMAP ============
     lat_grid = Column(Float)
     lon_grid = Column(Float)
@@ -187,6 +193,8 @@ class Location(Base):
         Index('idx_period', 'period'),
         Index('idx_battery_level', 'battery_level'),
         Index('idx_grid', 'lat_grid', 'lon_grid'),
+        Index('idx_district_name', 'district_name'),
+        Index('idx_province_name', 'province_name'),
     )
 
 
@@ -221,3 +229,63 @@ class GridAnalysis(Base):
         Index('idx_grid_unique', 'lat_grid', 'lon_grid', unique=True),
         Index('idx_grid_cell_gist', 'cell_geom', postgresql_using='gist'),
     )
+
+
+class District(Base):
+    """
+    Tabla de distritos de Santa Cruz de la Sierra
+    """
+    __tablename__ = "districts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # Información del distrito
+    district_number = Column(Integer, nullable=False, unique=True)  # Número del distrito (1-14)
+    district_name = Column(String(100), nullable=False)  # Nombre del distrito
+
+    # Geometría del polígono
+    geometry = Column(Geometry('MULTIPOLYGON', srid=4326), nullable=False)
+
+    # Área y perímetro (calculados)
+    area_km2 = Column(Float)  # Área en kilómetros cuadrados
+    perimeter_km = Column(Float)  # Perímetro en kilómetros
+
+    # Metadatos
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_district_geometry', 'geometry', postgresql_using='gist'),
+        Index('idx_district_number', 'district_number'),
+    )
+
+
+class Province(Base):
+    """
+    Tabla de provincias del departamento de Santa Cruz
+    """
+    __tablename__ = "provinces"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # Información de la provincia
+    province_name = Column(String(200), nullable=False)
+    municipality = Column(String(200))
+    department = Column(String(100))
+
+    # Geometría del polígono
+    geometry = Column(Geometry('MULTIPOLYGON', srid=4326), nullable=False)
+
+    # Área y perímetro
+    area_km2 = Column(Float)
+    perimeter_km = Column(Float)
+
+    # Metadatos
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_province_geometry', 'geometry', postgresql_using='gist'),
+        Index('idx_province_name', 'province_name'),
+    )
+
